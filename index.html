@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The database says no · Dog-Food write-up</title>
+<meta name="description" content="Building Dog-Food for DOGFOOD 2026: a hackathon judging platform where PostgreSQL enforces the rules, the normalization maths was tested against 500 simulated events, and an adversarial reviewer broke it before the judges could.">
+<meta name="author" content="Harini V M">
+<meta property="og:title" content="The database says no: building a hackathon judging platform that can't be quietly changed">
+<meta property="og:description" content="The decision that shaped everything, the maths that was worse than nothing, and the boring feature with the worst bug. With interactive labs.">
+<meta property="og:type" content="article">
+<meta name="theme-color" content="#f6f3ee">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="assets/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/site.css">
+<link rel="stylesheet" href="assets/blog.css">
+<script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+</head>
+<body>
+<a class="skip" href="#story">Skip to the story</a>
+<div class="progress" id="progress" aria-hidden="true"></div>
+
+<header class="bar">
+  <div class="in">
+    <a class="brand" href="#top" aria-label="Dog-Food write-up, top"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.5l2.2 1.6 2.7-.2 1 2.5 2.4 1.3-.5 2.7 1.2 2.4-1.9 2 .1 2.7-2.6.8-1.4 2.3-2.7-.5L12 21.5l-2.3-1.5-2.7.5-1.4-2.3-2.6-.8.1-2.7-1.9-2 1.2-2.4-.5-2.7 2.4-1.3 1-2.5 2.7.2z"/><path d="M8.5 12.2l2.4 2.4 4.8-5" stroke-linecap="round"/></svg>DOGFOOD</a>
+    <nav class="main" aria-label="Main">
+      <a href="#story" aria-current="page">Write-up</a>
+      <a href="#labs">Labs</a>
+      <a href="https://github.com/Harini-vm/Dog-Food">Repo ↗</a>
+    </nav>
+    <div class="who"><button class="btn quiet theme-btn" id="theme" type="button" aria-label="Switch light or dark">◐</button></div>
+  </div>
+</header>
+
+<div id="top" class="post-hero">
+  <p class="eyebrow">DOGFOOD 2026 · Write-Up Quest · Hackathon Raptors</p>
+  <h1>The database says no: building a hackathon judging platform that can't be quietly changed</h1>
+  <p class="dek">The brief was one line: <em>build the platform that will judge you.</em> This is how I built Dog-Food. It covers the decision that shaped it, the maths that was worse than doing nothing until I fixed it, and the boring feature that had the worst bug. Each idea has a small lab you can play with.</p>
+  <div class="byline">
+    <span>by <strong>Harini V M</strong></span>
+    <span>≈ 14 min read · 9 interactive labs</span>
+    <a href="https://github.com/Harini-vm/Dog-Food">github.com/Harini-vm/Dog-Food</a>
+  </div>
+  <div class="seals">
+    <span class="seal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#seal-ring"/><path d="M8.5 12.2l2.4 2.4 4.8-5"/></svg><span>Acceptance checks</span><code>7 / 7 PASS</code></span>
+    <span class="seal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#seal-ring"/><path d="M8.5 12.2l2.4 2.4 4.8-5"/></svg><span>Tests</span><code>132 passing</code></span>
+    <span class="seal ink"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#seal-ring"/><circle cx="12" cy="12" r="1.6"/></svg><span>Adversarial review</span><code>3 rounds, all fixed</code></span>
+    <span class="seal stamp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><use href="#seal-ring"/><path d="M9 9l6 6M15 9l-6 6"/></svg><span>Direct DB edit after publish</span><code>refused · DF004</code></span>
+  </div>
+</div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><path id="seal-ring" d="M12 2.5l2.2 1.6 2.7-.2 1 2.5 2.4 1.3-.5 2.7 1.2 2.4-1.9 2 .1 2.7-2.6.8-1.4 2.3-2.7-.5L12 21.5l-2.3-1.5-2.7.5-1.4-2.3-2.6-.8.1-2.7-1.9-2 1.2-2.4-.5-2.7 2.4-1.3 1-2.5 2.7.2z"/></defs></svg>
+
+<div class="post-hero" style="padding-top:0;padding-bottom:0">
+  <nav class="timeline chapters" aria-label="The story in four phases">
+    <a class="phase done" href="#decision"><p class="eyebrow">1 · Architecture</p><span class="state">The decision</span><p>Put the rules in PostgreSQL, and find out what that costs.</p></a>
+    <a class="phase done" href="#maths"><p class="eyebrow">2 · Judging maths</p><span class="state">The fight</span><p>Normalization that hurt, shrinkage that fixed it, 500 simulated events.</p></a>
+    <a class="phase now" href="#bugs"><p class="eyebrow">3 · Security</p><span class="state">The bugs</span><p>The invitation takeover, double votes, and an AI told to break it.</p></a>
+    <a class="phase" href="#redo"><p class="eyebrow">4 · Honesty</p><span class="state">The redo list</span><p>Gaps I report, a clock I'd change, things I left out on purpose.</p></a>
+  </nav>
+</div>
+
+<main class="post" id="story">
+<div class="workspace">
+  <nav class="rail" aria-label="Sections" id="rail">
+    <p class="ev">The write-up<small>DOGFOOD 2026</small></p>
+    <h4>Build</h4>
+    <a href="#why">Why it mattered</a>
+    <a href="#decision">The decision</a>
+    <a href="#hatch">Escape hatches</a>
+    <h4>Judging</h4>
+    <a href="#maths">Normalization</a>
+    <a href="#proof">The proof</a>
+    <a href="#pairwise">Pairwise</a>
+    <h4>Break it</h4>
+    <a href="#bugs">Invitations</a>
+    <a href="#votes">Votes</a>
+    <a href="#ai">The reviewer</a>
+    <h4>Ship</h4>
+    <a href="#offline">Offline</a>
+    <a href="#gaps">Honest gaps</a>
+    <a href="#redo">What I'd change</a>
+  </nav>
+
+<article>
+
+<!-- ============================================================ WHY -->
+<section id="why">
+  <p class="kicker">00 · Context</p>
+  <h2>A checklist item is also a promise</h2>
+  <p class="lede">DOGFOOD asked every team to build the same thing: an open-source, self-hostable hackathon platform. It had to cover registration, teams, submissions, judging, normalization, voting and results, start with <code>docker compose up</code>, and work with the network off. Hackathon Raptors will fork the winner and run their real events on it.</p>
+  <p>That last sentence changed how I read every requirement. "Scores lock after results are published" is a feature on a checklist. It is also a promise to a few hundred participants that <mark>nobody, including the organizers, can nudge a number afterwards.</mark> A promise like that can't depend on every developer remembering an <code>if</code> statement.</p>
+  <p>So I built Dog-Food around one question: <strong>what is the last thing that can say no?</strong></p>
+</section>
+
+<!-- ============================================================ DECISION -->
+<section id="decision">
+  <p class="kicker">01 · The architecture decision that shaped everything</p>
+  <h2>Put the rules in the database</h2>
+  <p>Most web apps enforce rules in the request handler: check the deadline, then insert. That works until someone adds a second code path. An import script, an admin tool, an API endpoint written at 3 a.m., or an organizer with <code>psql</code> open. Each one has to remember every rule.</p>
+  <p>So PostgreSQL is Dog-Food's last line of defence. The app still checks everything and returns friendly errors. Underneath, <strong>triggers refuse the same changes</strong>, with their own error codes, whatever path the change comes from:</p>
+
+  <div class="card scroll" style="margin:var(--s4) 0">
+  <table class="mini">
+    <thead><tr><th>SQLSTATE</th><th>the rule the database enforces</th></tr></thead>
+    <tbody>
+      <tr><td><span class="chip bad">DF001</span></td><td>no submission changes outside the submission window</td></tr>
+      <tr><td><span class="chip bad">DF002</span></td><td>a score must be inside the rubric's range</td></tr>
+      <tr><td><span class="chip bad">DF003</span></td><td>a published results snapshot can never be edited or deleted</td></tr>
+      <tr><td><span class="chip bad">DF004</span></td><td>scores and pairwise answers lock the moment results are published</td></tr>
+      <tr><td><span class="chip bad">DF005</span></td><td>no votes outside the voting window</td></tr>
+      <tr><td><span class="chip bad">DF006</span></td><td>issued certificates are immutable</td></tr>
+      <tr><td><span class="chip bad">DF009</span></td><td>the audit log is append-only and hash-chained</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The score lock is the simplest one:</p>
+<pre class="code"><span class="k">CREATE FUNCTION</span> scores_locked() <span class="k">RETURNS trigger AS</span> $$
+<span class="k">DECLARE</span> ev text; pub timestamptz;
+<span class="k">BEGIN</span>
+    <span class="c">-- ...find the event this row belongs to...</span>
+    <span class="k">SELECT</span> results_published_at <span class="k">INTO</span> pub <span class="k">FROM</span> events <span class="k">WHERE</span> id = ev;
+    <span class="k">IF</span> pub <span class="k">IS NOT NULL THEN</span>
+        <span class="e">RAISE EXCEPTION 'results are published; scores are locked' USING ERRCODE = 'DF004';</span>
+    <span class="k">END IF</span>;
+    <span class="k">RETURN</span> coalesce(NEW, OLD);
+<span class="k">END</span> $$ <span class="k">LANGUAGE</span> plpgsql;</pre>
+  <p class="figure-cap">migrations/003_organize.sql. The same function guards <code>scores</code>, <code>score_items</code> and pairwise <code>comparisons</code>.</p>
+
+  <div class="lab" id="labs">
+    <header><h3>Lab 1 · Try to break the rules from <code>psql</code></h3><span class="tag">interactive</span></header>
+    <div class="body">
+      <p class="hint">You're an organizer with direct database access, the strongest position there is. Move the event's clock, then try each statement. The app's checks aren't involved here; only the triggers are.</p>
+      <div class="switches">
+        <label><input type="checkbox" id="sw-deadline"> Submissions have closed</label>
+        <label><input type="checkbox" id="sw-published"> Results are published</label>
+        <label><input type="checkbox" id="sw-voting" checked> Voting is open</label>
+      </div>
+      <div class="stmts" id="stmts"></div>
+      <div class="console" id="console" role="log" aria-live="polite"><div class="dim">-- pick a statement above</div></div>
+    </div>
+  </div>
+
+  <p>In my demo video I run an <code>UPDATE scores</code> by hand after publishing, and the database refuses it. Of everything in the project, that one refusal is what I'd point to.</p>
+
+  <h3>One decision, many consequences</h3>
+  <ul>
+    <li><strong>No ORM.</strong> Every query is plain SQL with psycopg 3. When the rules live in triggers, I want to see exactly which statement fires them.</li>
+    <li><strong>Composite foreign keys.</strong> Tables carry <code>(id, event_id)</code> pairs, so a score can't point at a project from another event, even by mistake.</li>
+    <li><strong>One live entry per team</strong> is a partial unique index, not an <code>if</code> statement. The fixture has a team that submitted twice (prj_41). The second entry is stored as <code>duplicate</code> and never ranked.</li>
+  </ul>
+<pre class="code"><span class="k">CREATE UNIQUE INDEX</span> one_live_entry_per_team
+    <span class="k">ON</span> projects (team_id) <span class="k">WHERE</span> status <span class="k">IN</span> (<span class="s">'draft'</span>, <span class="s">'submitted'</span>);</pre>
+</section>
+
+<!-- ============================================================ HATCH -->
+<section id="hatch">
+  <p class="kicker">01b · What the triggers cost me</p>
+  <h2>Escape hatches are where the bugs live</h2>
+  <p>Two things went wrong.</p>
+  <p><strong>The importer.</strong> Loading the fixture means inserting projects whose deadline passed months ago, which DF001 refuses. I added a transaction-local setting, <code>dogfood.importing</code>, that the triggers respect. It is one escape hatch, it lives for one transaction, and it is documented. I still don't love it (see <a href="#redo">what I'd change</a>).</p>
+  <p><strong>Moderation after the deadline.</strong> Organizers must be able to withdraw an entry or mark it a duplicate <em>after</em> submissions close. So the deadline trigger allows an update when only the status changes:</p>
+<pre class="code"><span class="k">IF</span> TG_OP = <span class="s">'UPDATE'</span> <span class="k">AND</span> (NEW.title, NEW.summary, NEW.repo_url, NEW.track_id, NEW.team_id)
+                     <span class="k">IS NOT DISTINCT FROM</span> (OLD.title, OLD.summary, OLD.repo_url, OLD.track_id, OLD.team_id)
+   <span class="k">AND</span> NEW.status <span class="k">IN</span> (<span class="s">'withdrawn'</span>, <span class="s">'duplicate'</span>) <span class="k">THEN</span>
+    <span class="k">RETURN</span> NEW;   <span class="c">-- content frozen, status may move</span>
+<span class="k">END IF</span>;</pre>
+  <p>That looks safe, because the content can't change. Then the adversarial review found the hole. Try it:</p>
+
+  <div class="lab">
+    <header><h3>Lab 2 · Sneak a late entry into judging</h3><div class="seg" role="group" aria-label="Version"><button type="button" data-v="before" aria-pressed="true">Before the fix</button><button type="button" data-v="after" aria-pressed="false">After the fix</button></div></header>
+    <div class="body">
+      <p class="hint">The deadline has passed. Team Night Owl never pressed Submit: their entry is still a <code>draft</code>. You are their friendly organizer.</p>
+      <div class="states" id="sm-states"></div>
+      <div class="actions" id="sm-actions"></div>
+      <div class="verdict" id="sm-verdict"></div>
+    </div>
+  </div>
+
+  <p>The trigger did exactly what I told it to. What was missing was an app-level rule about <em>which</em> status may move to <em>which</em>. Now only submitted entries can be withdrawn, and only entries that were submitted can be restored.</p>
+  <div class="note ok lesson"><p class="eyebrow">Lesson</p>A trigger protects the <em>data</em>. It doesn't know your <em>state machine</em>. You still need both layers, and every exception in a trigger deserves a test that tries to abuse it.</div>
+</section>
+
+<!-- ============================================================ MATHS -->
+<section id="maths">
+  <p class="kicker">02 · The scoring algorithm I almost shipped</p>
+  <h2>The textbook fix was worse than doing nothing</h2>
+  <p>In the fixture, judges' average scores range from <strong>25 to 81</strong> out of 100 on the same kind of projects. With raw averages, your rank depends on who happened to review you. The spec asks for cross-judge normalization, and the textbook answer is a per-judge z-score: subtract each judge's mean, divide by their spread.</p>
+  <p>I implemented it, then looked at what it did to the real fixture. One judge, Tomas Varga, reviewed <em>exactly one</em> project and gave it 25. A plain z-score decides from that single review that Tomas is extremely harsh, and gives that project a huge boost. <mark>One data point gets treated as a personality.</mark></p>
+  <p>On the real fixture that's not hypothetical. Tomas's one review was for <em>Dry Harbour</em>, which raw averages rank 30th of 40. A plain z-score lifts it to <strong>8th</strong>, on the strength of one judge's one opinion. (Try it in Lab 3 below: press "Plain z-score".)</p>
+  <p>The fix is <strong>shrinkage</strong>: pull each judge's mean and spread toward the whole panel, more strongly the fewer reviews they have.</p>
+<pre class="code">m2  = (n * m + <span class="k">k</span> * M) / (n + <span class="k">k</span>)                <span class="c"># judge mean, pulled toward panel mean M</span>
+sd2 = sqrt((n * v + <span class="k">k</span> * var) / (n + <span class="k">k</span>))       <span class="c"># judge spread, pulled toward panel spread</span>
+adjusted = M + S * (x - m2) / sd2
+
+score = (sum(adjusted) + <span class="k">c</span> * M) / (len(adjusted) + <span class="k">c</span>)   <span class="c"># c "average reviews" per project</span></pre>
+  <p class="figure-cap">services/results.py: <code>adjust()</code> and <code>project_score()</code>, both pure functions, so the proof script below can call them directly.</p>
+
+  <div class="lab">
+    <header><h3>Lab 3 · The normalization bench, on the real fixture</h3><span class="tag">122 reviews · 30 judges · 40 projects</span></header>
+    <div class="body">
+      <p class="hint">This runs the same formula as Dog-Food, in your browser, on the published <code>fixtures.json</code>. Drag <strong>K</strong> to 0 for a plain z-score and watch Tomas's project. Drag it all the way right to switch the correction off.</p>
+      <div class="presets" role="group" aria-label="Presets">
+        <button class="btn" type="button" data-k="0" data-c="0">Plain z-score</button>
+        <button class="btn primary" type="button" data-k="3" data-c="1">Dog-Food (K 3, C 1)</button>
+        <button class="btn" type="button" data-k="1000" data-c="0">No correction</button>
+      </div>
+      <div class="ctl"><label for="k">K · judge shrinkage</label><input type="range" id="k" min="0" max="21" step="1" value="3"><output id="kv">3</output></div>
+      <div class="ctl"><label for="c">C · project prior</label><input type="range" id="c" min="0" max="4" step="0.5" value="1"><output id="cv">1</output></div>
+      <div class="two" style="margin-top:var(--s4)">
+        <div>
+          <p class="eyebrow">How much each judge is corrected</p>
+          <div class="scroll"><table class="mini" id="judge-table"></table></div>
+        </div>
+        <div>
+          <p class="eyebrow">Top 10 · rank vs raw average</p>
+          <div class="scroll"><table class="mini standings" id="rank-table"></table></div>
+        </div>
+      </div>
+      <p class="tip" id="bench-note" style="margin-top:var(--s3)"></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ PROOF -->
+<section id="proof">
+  <p class="kicker">02b · Not by feel</p>
+  <h2>500 simulated events, ranked by the portal's own code</h2>
+  <p>A formula that "looks fair" is easy to believe and hard to defend. So I wrote <code>tools/normalization_proof.py</code>. It simulates 500 events shaped like the fixture: 40 projects, 30 judges, 3 reviews each assigned by my real planner, and about 20% of third reviews missing. Every project has a hidden true quality. Every judge has a leniency and a scale, and 10% are flat scorers who give about 4 to everything, like fixture judge Iva Petrova. Then it ranks each event with Dog-Food's real scoring functions and compares the ranking with the truth.</p>
+
+  <div class="lab">
+    <header><h3>Lab 4 · How close is each method to the truth?</h3><span class="tag">Spearman ρ · 500 events</span></header>
+    <div class="body">
+      <svg class="chart" id="methods-chart" viewBox="0 0 640 210" role="img" aria-label="Bar chart: raw average 0.839, plain z-score 0.787, shrunk z-score 0.870, Dog-Food 0.870"></svg>
+      <p class="hint">The plain z-score (red) ranks <strong>worse than doing nothing</strong>. Dog-Food beats raw averages in 410 of 500 events and the plain z-score in 462 of 500.</p>
+    </div>
+  </div>
+
+  <p>K wasn't picked by feel either. The same simulation sweeps it:</p>
+
+  <div class="lab">
+    <header><h3>Lab 5 · Sweep K yourself</h3><span class="tag">hover or tap a point</span></header>
+    <div class="body">
+      <svg class="chart" id="k-chart" viewBox="0 0 640 240" role="img" aria-label="Line chart of Spearman rho against K: peaks at K equals 3 with 0.870"></svg>
+      <p class="tip" id="k-tip">K = 3 · ρ 0.870 ± 0.004 · the peak</p>
+    </div>
+  </div>
+
+  <p>The curve is flat around the top, so any small K works. I chose 3 because it is easy to explain to an organizer: <em>a judge's habits count fully once they have clearly more than three reviews.</em></p>
+
+  <h3>The parameter that didn't matter, and why I kept it</h3>
+  <p>The project prior <code>C = 1</code> adds one "average review" to every project, so two enthusiastic reviews can't beat five solid ones. I expected it to improve accuracy. The sweep showed ρ stays at <strong>0.870 whatever C is</strong> (0.870, 0.871, 0.870, 0.870, 0.869 for C = 0 to 4).</p>
+  <p>So the docs call it what it is: <strong>a fairness choice, not an accuracy one.</strong> The organizer's results preview shows a ▲/▼ next to every project the correction moved, so nobody has to trust a formula they can't see. Being able to say "this parameter does nothing for accuracy, and here's why I kept it anyway" is more defensible than inflating it.</p>
+  <p>The proof also runs as a smaller test on every build (<code>tests/test_normalization_proof.py</code>). If someone "improves" the maths and makes it worse, the build fails.</p>
+
+  <div class="note warn"><p class="eyebrow" style="color:var(--marker)">What the proof does not prove</p>The simulation assumes judges differ in leniency and scale but agree on <em>order</em>. A judge with genuinely different taste isn't something any normalization can or should correct. And with 3 reviews per project, even the best method misses part of the true top 10: more reviews help more than any formula, which is why the dashboard flags under-reviewed projects.</div>
+</section>
+
+<!-- ============================================================ PAIRWISE -->
+<section id="pairwise">
+  <p class="kicker">02c · A statistic that lied with small numbers</p>
+  <h2>Pairwise mode, and the τ I had to hide</h2>
+  <p>People are bad at absolute scales ("is this a 3 or a 4?") and good at comparisons ("which of these two is better?"). For the pairwise bonus, judges answer the second kind of question, and Dog-Food fits a <strong>Bradley–Terry</strong> model with the MM algorithm: P(i beats j) = pᵢ / (pᵢ + pⱼ).</p>
+  <p>Two details mattered:</p>
+  <ul>
+    <li><strong>A virtual draw.</strong> Every entry also plays one draw against an "average entry". Without it, an entry that won every comparison gets <em>infinite</em> strength, and a rarely compared entry swings wildly.</li>
+    <li><strong>Close calls first.</strong> The generator asks about entries next to each other in the current ranking, where the rubric is least sure. Which side is shown on the left comes from a keyed hash per judge, so no entry always benefits from being seen first.</li>
+  </ul>
+  <p>I wanted organizers to see how well pairwise agrees with the rubric, so I first showed Kendall's τ between the two rankings. With only a handful of answers, τ swung all over the place, and an organizer could easily act on noise. Watch it happen:</p>
+
+  <div class="lab">
+    <header><h3>Lab 6 · Be the judging panel</h3><span class="tag">Bradley–Terry · live</span></header>
+    <div class="body">
+      <p class="hint">Six entries with a hidden true order. Pick the better one yourself, or let simulated judges answer (on close calls they're right about two times in three). τ stays hidden until there are about 3 answers per entry; the sparkline shows what it <em>would</em> have said.</p>
+      <div class="duel" id="duel"></div>
+      <div class="actions">
+        <button class="btn" type="button" id="bt-one">Ask a simulated judge</button>
+        <button class="btn" type="button" id="bt-ten">Ask 10</button>
+        <button class="btn quiet" type="button" id="bt-reset">Reset</button>
+      </div>
+      <div class="two" style="margin-top:var(--s4)">
+        <div>
+          <p class="eyebrow">Bradley–Terry ranking · chance to beat an average entry</p>
+          <table class="mini" id="bt-table"></table>
+        </div>
+        <div>
+          <p class="eyebrow">What the organizer sees</p>
+          <div id="bt-agree"></div>
+          <p class="eyebrow" style="margin-top:var(--s4)">τ after each answer (hidden from organizers until the line)</p>
+          <svg class="chart spark" id="bt-spark" viewBox="0 0 300 64" preserveAspectRatio="none" aria-hidden="true"></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p>Now the preview shows τ only once there are about three answers per entry. Before that, it shows a plain count like "judges agreed with the rubric in 7 of 9 head-to-heads", plus the exact pairs that disagree. <mark>A count can't pretend to be more certain than it is.</mark></p>
+  <p>Pairwise doesn't replace the published ranking: the rubric is what participants were promised. It is a second opinion. Where the two agree, publish with confidence; where they disagree, look at those entries again.</p>
+</section>
+
+<!-- ============================================================ BUGS -->
+<section id="bugs">
+  <p class="kicker">03 · The part of the spec I thought was simple</p>
+  <h2>Judge invitations, and the account takeover hiding in them</h2>
+  <p>Invitations looked like the simplest part of T2. The organizer types an email and gets a one-time link, the judge opens it and sets a password, and no email server is needed.</p>
+  <p>The real version: one account can judge in several events, run by different organizers, and the link sets the password of an account that <em>may already exist</em>. The review found an attack in that gap. Step through it:</p>
+
+  <div class="lab">
+    <header><h3>Lab 7 · Replay the attack</h3><span class="tag">critical · fixed</span></header>
+    <div class="body">
+      <div class="actions" style="margin-top:0">
+        <button class="btn primary" type="button" id="atk-next">Next step</button>
+        <button class="btn quiet" type="button" id="atk-reset">Start over</button>
+        <span class="muted" id="atk-count" style="font-size:.88rem"></span>
+      </div>
+      <div class="replay">
+        <div class="col"><h4>Before the fix</h4><ol class="steps" id="atk-before"></ol><div class="acct" id="acct-before"></div></div>
+        <div class="col"><h4>After the fix</h4><ol class="steps" id="atk-after"></ol><div class="acct" id="acct-after"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <p>A second review pass found the same attack in the reverse order, with the attacker inviting first. An old, unused link could also reset the password of an account that was already active. The fix has three parts:</p>
+  <ul>
+    <li>While an account is pending activation for one event, no other event can add a role to it (<code>409 pending_elsewhere</code>; only the admin can).</li>
+    <li>A link never works on an active account. It is never a password reset.</li>
+    <li>Accepting a link cancels the account's other open links.</li>
+  </ul>
+  <blockquote class="pull">The spec doesn't say "multi-tenant identity is hard". You find out the moment two organizers share one users table.</blockquote>
+</section>
+
+<!-- ============================================================ VOTES -->
+<section id="votes">
+  <p class="kicker">03b · Two smaller ones from the voting side</p>
+  <h2>Two doors, one budget</h2>
+  <p>People's-choice voting has two ways in: vote with an account, or with a one-time email link (for people who never sign up). Both worked, and both enforced a budget of 3 votes. The trouble was that each door kept <em>its own</em> budget.</p>
+
+  <div class="lab">
+    <header><h3>Lab 8 · Vote as many times as you can</h3><div class="seg" role="group" aria-label="Version"><button type="button" data-vv="before" aria-pressed="true">Before</button><button type="button" data-vv="after" aria-pressed="false">After (migration 008)</button></div></header>
+    <div class="body">
+      <p class="hint">You are <code>meera@college.edu</code>, with an account and an email link. Budget: 3 votes.</p>
+      <div class="ballot"><button class="btn" type="button" id="v-acct">Vote with my account</button><button class="btn" type="button" id="v-mail">Vote with my email link</button><button class="btn quiet" type="button" id="v-reset">Reset</button></div>
+      <div class="ballot"><span class="muted" style="font-size:.9rem">votes stored:</span><span class="pips" id="v-pips"></span><span class="num" id="v-n"></span></div>
+      <div id="v-msg"></div>
+    </div>
+  </div>
+
+  <p>The fix: a voter is identified by a <strong>keyed hash of their email address</strong> on both paths (HMAC with a server secret, so the table never holds raw addresses). One person has one budget, whichever door they use. The budget check itself takes a row lock (<code>SELECT … FOR UPDATE</code>), so 20 parallel requests with 3 votes left store exactly 3. There's a test for that.</p>
+  <p><strong>Unsealing by editing.</strong> Counts are sealed while voting is open, even from the admin. But an organizer could clear the voting dates mid-vote, which ended voting and showed the counts. Now voting can't be removed or reopened once any vote exists (<code>409 votes_exist</code>).</p>
+</section>
+
+<!-- ============================================================ AI -->
+<section id="ai">
+  <p class="kicker">03c · How I used AI</p>
+  <h2>The most useful agent was the one told to break it</h2>
+  <p>AI assistants are allowed and expected in DOGFOOD, and I built Dog-Food with Claude. The biggest jump in quality came after the features worked: I gave the code to a <strong>separate</strong> agent with one instruction: <em>break it.</em> It ran three rounds. Every finding was fixed and got its own regression test in <code>tests/test_review_fixes.py</code>.</p>
+
+  <div class="card scroll" style="margin:var(--s4) 0">
+  <table class="mini findings">
+    <thead><tr><th>severity</th><th>finding</th></tr></thead>
+    <tbody>
+      <tr><td><span class="chip bad">critical</span></td><td>Cross-event account takeover through invitation links (Lab 7)</td></tr>
+      <tr><td><span class="chip bad">high</span></td><td>Voting-link, invitation and login forms had no CSRF field: logged-in people got 403s</td></tr>
+      <tr><td><span class="chip warn">medium</span></td><td>Two vote budgets for one person (Lab 8)</td></tr>
+      <tr><td><span class="chip warn">medium</span></td><td>Sealed counts revealed by clearing the voting dates</td></tr>
+      <tr><td><span class="chip warn">medium</span></td><td>Draft → withdrawn → restored = late submission (Lab 2)</td></tr>
+      <tr><td><span class="chip warn">medium</span></td><td>Webhook SSRF: redirects were followed and the address was only checked at creation</td></tr>
+      <tr><td><span class="chip">low</span></td><td>DNS rebinding and NAT64 addresses (<code>64:ff9b::/96</code>) slipped past the webhook address check</td></tr>
+      <tr><td><span class="chip">low</span></td><td>500 errors from hostile input: a JSON object where text was expected, a NUL byte, a malformed flash cookie</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The tests I'd written hadn't caught any of these. That wasn't for lack of tests: there are 132. But <mark>my tests encode my assumptions, and these bugs lived where my assumptions were wrong.</mark> A reviewer that doesn't share them is worth more than another hundred tests from the same author.</p>
+  <p>The webhook fix is a good example of how deep "just block private IPs" goes. The final sender resolves the host <strong>once</strong>. It refuses any address that isn't global, including IPv4-mapped and NAT64 forms. Then it connects to <em>exactly that IP</em> (so a second DNS answer can't swap it), and it never follows a redirect.</p>
+</section>
+
+<!-- ============================================================ OFFLINE -->
+<section id="offline">
+  <p class="kicker">04 · The Docker and offline gotchas</p>
+  <h2>"Works with the network off" rules out more than you think</h2>
+  <ul>
+    <li><strong>Fonts.</strong> One Google Fonts link in a template breaks it. I bundled the IBM Plex fonts (SIL OFL) in <code>static/fonts</code>, and a test fails the build if any template references an external script, style or font. This blog uses the same bundled files.</li>
+    <li><strong>Docker Hub was blocked</strong> in the environment I built in, so I couldn't build the image there. I verified the app in the closest thing to the container: a fresh virtualenv, a non-root user, Postgres over TCP, and the pinned requirements. Then I built and ran the real image on my laptop. That means verifying in two places, and next time I'd plan for it from day one.</li>
+    <li><strong>Seeding from the fixture's own date.</strong> One acceptance check needs the fixture event to be <em>closed</em>. If the seed computes dates from "now", the check passes or fails depending on when the judges run it. The seed uses the fixture's own <code>submissions_close</code>.</li>
+    <li><strong>Webhooks can't need the internet either.</strong> Delivery goes through an outbox table, written in the same transaction as the change. A rolled-back change never fires a webhook, and a receiver that's down just means retries (signed <code>t=…,v1=…</code>, same envelope id every time).</li>
+  </ul>
+</section>
+
+<!-- ============================================================ GAPS -->
+<section id="gaps">
+  <p class="kicker">04b · Honest gap reporting</p>
+  <h2>The line I didn't hide</h2>
+  <p>My <code>.dogfood.toml</code> claims T1 to T4. The official checker said:</p>
+<pre class="report">DOGFOOD 2026 acceptance report
+claimed: T1 T2 T3 T4
+
+T1  gallery is public ................. <span class="p">PASS</span>
+T1  project from fixtures shown ....... <span class="p">PASS</span>
+T1  closed event refuses submissions .. <span class="p">PASS</span>
+T2  judge sees own scores ............. <span class="p">PASS</span>
+T2  judge cannot see peer scores ...... <span class="p">PASS</span>
+T2  participant blocked ............... <span class="p">PASS</span>
+T2  csv export works .................. <span class="p">PASS</span>
+
+<span class="w">claimed T1 T2 T3 T4, verified T1 T2</span>
+<span class="w">note: claimed but not verified: T3 T4</span></pre>
+  <p>That's not a failure: the official checker only tests T1 and T2. I didn't hide the line or reword it. Instead, <code>docs/edge-cases.md</code> lists every T3 and T4 policy next to the test that proves it. Ten identical votes at once become one vote. Twenty parallel votes with 3 left store exactly 3. A webhook to <code>169.254.169.254</code> is refused. Export, import, export gives identical content. Sixteen kinds of broken import file each return 400 and write nothing.</p>
+</section>
+
+<!-- ============================================================ REDO -->
+<section id="redo">
+  <p class="kicker">04c · The schema and code I'd redo</p>
+  <h2>What I would change</h2>
+  <h3>1 · <code>now()</code> in the deadline trigger</h3>
+  <p>In PostgreSQL, <code>now()</code> is the start time of the <em>transaction</em>, not the moment of the insert. A transaction that begins just before the deadline and writes just after it passes the check. Each Dog-Food request is one short transaction, so the window is tiny. But <code>clock_timestamp()</code> is the correct choice, and it's the first thing I'd change.</p>
+
+  <div class="lab">
+    <header><h3>Lab 9 · Race the deadline</h3><span class="tag">deadline 18:00:00</span></header>
+    <div class="body">
+      <div class="ctl"><label for="tx-start">Transaction begins</label><input type="range" id="tx-start" min="-10" max="8" step="0.5" value="-3"><output id="tx-start-v"></output></div>
+      <div class="ctl"><label for="tx-len">Takes</label><input type="range" id="tx-len" min="0.5" max="12" step="0.5" value="4"><output id="tx-len-v"></output></div>
+      <div class="clock" id="clock" aria-hidden="true"><div class="track"></div><div class="deadline" id="dl"><span>18:00:00</span></div><div class="tx" id="txbar"></div><div class="mk" id="mk-a"></div><div class="mk" id="mk-b"></div></div>
+      <div class="verdicts"><div class="note" id="vd-now"></div><div class="note" id="vd-clock"></div></div>
+    </div>
+  </div>
+
+  <h3>2 · The in-memory rate limiter</h3>
+  <p>It is simple, works offline, and checks login limits <em>before</em> verifying the password, so the right password still gets a 429 after 10 failures. But run two app containers and each has its own memory, so the limits double. For one container on one laptop, which is what the spec asks for, it's right. For a scaled deployment it belongs in Postgres.</p>
+  <h3>3 · The importer escape hatch</h3>
+  <p>I'd rather the importer write through a dedicated database role that the triggers recognise than through a session setting any connection could set.</p>
+
+  <h3>Left out on purpose</h3>
+  <p>No ORM, no single-page app, no CDN, no Redis. Each one adds a moving part and no guarantee. Dog-Food is one FastAPI app with server-rendered pages and one PostgreSQL database. It starts with one command and works with the Wi-Fi off.</p>
+  <blockquote class="pull">If Hackathon Raptors really does fork one of these, I want the person running it on a Saturday night to be able to read every line.</blockquote>
+
+  <div class="card endcard">
+    <p class="eyebrow">Go deeper</p>
+    <ul class="plain">
+      <li><a href="https://github.com/Harini-vm/Dog-Food">The repo</a>: <code>docker compose up</code>, then open <code>localhost:8080</code></li>
+      <li><a href="https://github.com/Harini-vm/Dog-Food/blob/main/JUDGING.md">JUDGING.md</a>: assignment, scoring, normalization and pairwise, with fixture numbers</li>
+      <li><a href="https://github.com/Harini-vm/Dog-Food/blob/main/docs/normalization-proof.md">docs/normalization-proof.md</a>: the 500-event simulation</li>
+      <li><a href="https://github.com/Harini-vm/Dog-Food/blob/main/docs/edge-cases.md">docs/edge-cases.md</a>: every policy, its test, and the review findings</li>
+      <li><a href="https://github.com/Harini-vm/Dog-Food/blob/main/THREAT-MODEL.md">THREAT-MODEL.md</a>: Sybil voting, ballot stuffing, collusion, deadline gaming</li>
+    </ul>
+  </div>
+</section>
+
+</article>
+</div>
+</main>
+
+<footer>
+  <div class="post-foot">
+    <span>Written by Harini V M for the DOGFOOD 2026 Write-Up Quest · Hackathon Raptors</span>
+    <span>Styled with Dog-Food's own "paper and ink" stylesheet · IBM Plex (SIL OFL)</span>
+  </div>
+</footer>
+
+<script src="assets/fixture-data.js"></script>
+<script src="assets/blog.js"></script>
+</body>
+</html>
